@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SENTINEL — Worker Safety Telemetry</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+  :root{
+    --bg: #0a0a0f;
+    --bg-panel: #111118;
+    --bg-panel-2: #15151f;
+    --line: #232333;
+    --purple: #9d4edd;
+    --purple-dim: #6b2fa8;
+    --purple-glow: rgba(157,78,221,0.35);
+    --amber: #ffb627;
+    --red: #ff3b5c;
+    --green: #2ee6a6;
+    --text: #e8e6f0;
+    --text-dim: #6e6c80;
+    --text-mid: #a8a5bd;
+    --mono: 'JetBrains Mono', monospace;
+    --disp: 'Space Grotesk', sans-serif;
+  }
+
+  *{margin:0;padding:0;box-sizing:border-box;}
+
+  body{
+    background:
+      radial-gradient(ellipse 1200px 600px at 50% -10%, rgba(157,78,221,0.08), transparent),
+      var(--bg);
+    color:var(--text);
+    font-family:var(--disp);
+    min-height:100vh;
+    padding:24px;
+  }
+
+  /* ============ HEADER ============ */
+  .header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:16px;
+    margin-bottom:22px;
+    padding-bottom:18px;
+    border-bottom:1px solid var(--line);
+  }
+  .brand{display:flex;align-items:center;gap:14px;}
+  .brand-mark{
+    width:38px;height:38px;
+    border:1.5px solid var(--purple);
+    border-radius:8px;
+    display:flex;align-items:center;justify-content:center;
+    position:relative;
+    box-shadow:0 0 18px var(--purple-glow);
+  }
+  .brand-mark::before{
+    content:'';
+    width:14px;height:14px;
+    background:var(--purple);
+    clip-path:polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
+  }
+  .brand h1{
+    font-size:19px;
+    font-weight:700;
+    letter-spacing:0.06em;
+  }
+  .brand .sub{
+    font-family:var(--mono);
+    font-size:10.5px;
+    color:var(--text-dim);
+    letter-spacing:0.08em;
+    margin-top:2px;
+  }
+
+  .conn-block{display:flex;align-items:center;gap:12px;}
+  .device-tag{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--text-mid);
+    padding:6px 11px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .device-tag .dot{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--text-dim);
+  }
+  .device-tag.live .dot{
+    background:var(--green);
+    box-shadow:0 0 8px var(--green);
+    animation:pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
+
+  button#connectBtn{
+    font-family:var(--mono);
+    font-size:12px;
+    font-weight:500;
+    letter-spacing:0.04em;
+    background:var(--purple);
+    color:#0a0a0f;
+    border:none;
+    padding:10px 18px;
+    border-radius:7px;
+    cursor:pointer;
+    transition:all .15s ease;
+  }
+  button#connectBtn:hover{background:#b266ff;box-shadow:0 0 20px var(--purple-glow);}
+  button#connectBtn.connected{
+    background:transparent;
+    color:var(--red);
+    border:1px solid var(--red);
+  }
+  button#connectBtn.connected:hover{background:rgba(255,59,92,0.1);}
+  button#connectBtn:disabled{opacity:0.4;cursor:wait;}
+
+  /* ============ ALERT BANNER ============ */
+  .alert-banner{
+    display:none;
+    align-items:center;
+    gap:12px;
+    padding:13px 18px;
+    border-radius:9px;
+    margin-bottom:20px;
+    font-family:var(--mono);
+    font-size:13px;
+    letter-spacing:0.02em;
+    border:1px solid transparent;
+  }
+  .alert-banner.show{display:flex;}
+  .alert-banner.warn{
+    background:rgba(255,182,39,0.08);
+    border-color:rgba(255,182,39,0.35);
+    color:var(--amber);
+  }
+  .alert-banner.crit{
+    background:rgba(255,59,92,0.1);
+    border-color:rgba(255,59,92,0.5);
+    color:var(--red);
+    animation:critGlow 1s ease-in-out infinite;
+  }
+  @keyframes critGlow{0%,100%{box-shadow:0 0 0 rgba(255,59,92,0);}50%{box-shadow:0 0 22px rgba(255,59,92,0.35);}}
+  .alert-banner b{font-weight:700;}
+
+  /* ============ GRID ============ */
+  .grid{
+    display:grid;
+    grid-template-columns: 1.15fr 1fr;
+    gap:18px;
+  }
+  @media (max-width:880px){ .grid{grid-template-columns:1fr;} }
+
+  .panel{
+    background:var(--bg-panel);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:20px;
+    position:relative;
+    overflow:hidden;
+  }
+  .panel-head{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    margin-bottom:16px;
+  }
+  .panel-title{
+    font-size:12px;
+    font-weight:600;
+    letter-spacing:0.12em;
+    text-transform:uppercase;
+    color:var(--text-mid);
+  }
+  .panel-title .accent{color:var(--purple);}
+  .panel-meta{
+    font-family:var(--mono);
+    font-size:10.5px;
+    color:var(--text-dim);
+  }
+
+  /* ============ GAS CARDS ============ */
+  .gas-rows{display:flex;flex-direction:column;gap:10px;}
+  .gas-row{
+    background:var(--bg-panel-2);
+    border:1px solid var(--line);
+    border-radius:9px;
+    padding:13px 15px;
+    display:grid;
+    grid-template-columns: 78px 1fr auto;
+    align-items:center;
+    gap:14px;
+    transition:border-color .25s ease;
+  }
+  .gas-row.active{border-color:var(--purple-dim);}
+  .gas-name{
+    font-family:var(--mono);
+    font-size:12px;
+    font-weight:700;
+    color:var(--text);
+  }
+  .gas-name .sub{
+    display:block;
+    font-size:9.5px;
+    font-weight:400;
+    color:var(--text-dim);
+    margin-top:2px;
+  }
+  .gas-bar-wrap{
+    height:6px;
+    background:#1c1c28;
+    border-radius:4px;
+    overflow:hidden;
+  }
+  .gas-bar{
+    height:100%;
+    width:0%;
+    border-radius:4px;
+    background:linear-gradient(90deg, var(--purple-dim), var(--purple));
+    transition:width .5s cubic-bezier(.4,0,.2,1), background .3s ease;
+  }
+  .gas-stats{
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--text-dim);
+    margin-top:5px;
+    display:flex;
+    gap:10px;
+  }
+  .gas-ppm{
+    font-family:var(--mono);
+    font-size:18px;
+    font-weight:700;
+    text-align:right;
+    min-width:78px;
+  }
+  .gas-ppm .unit{font-size:10px;color:var(--text-dim);font-weight:400;}
+
+  .id-block{
+    margin-top:16px;
+    padding-top:16px;
+    border-top:1px dashed var(--line);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .id-label{font-size:10px;color:var(--text-dim);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:4px;}
+  .id-value{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--purple);}
+  .id-source{font-family:var(--mono);font-size:10.5px;color:var(--text-dim);}
+  .status-pill{
+    font-family:var(--mono);
+    font-size:11px;
+    font-weight:700;
+    padding:6px 13px;
+    border-radius:20px;
+    letter-spacing:0.04em;
+  }
+  .status-pill.ok{background:rgba(46,230,166,0.12);color:var(--green);}
+  .status-pill.warn{background:rgba(255,182,39,0.12);color:var(--amber);}
+  .status-pill.crit{background:rgba(255,59,92,0.15);color:var(--red);}
+
+  /* ============ MOTION PANEL ============ */
+  .orientation-stage{
+    height:190px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    perspective:600px;
+    margin-bottom:14px;
+  }
+  #hudSvg{width:100%;height:100%;}
+
+  .motion-readout{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:8px;
+    margin-bottom:14px;
+  }
+  .ro-cell{
+    background:var(--bg-panel-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:9px 10px;
+    text-align:center;
+  }
+  .ro-cell .ro-label{font-size:9px;color:var(--text-dim);letter-spacing:0.08em;text-transform:uppercase;}
+  .ro-cell .ro-val{font-family:var(--mono);font-size:16px;font-weight:700;margin-top:3px;}
+
+  .activity-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    background:var(--bg-panel-2);
+    border:1px solid var(--line);
+    border-radius:9px;
+    padding:12px 15px;
+    margin-bottom:10px;
+  }
+  .activity-label{font-size:10px;color:var(--text-dim);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:3px;}
+  .activity-value{font-family:var(--mono);font-size:15px;font-weight:700;}
+
+  .g-meter{display:flex;align-items:center;gap:10px;}
+  .g-meter-bar{
+    flex:1;
+    height:8px;
+    background:#1c1c28;
+    border-radius:4px;
+    overflow:hidden;
+    position:relative;
+  }
+  .g-meter-fill{
+    height:100%;
+    background:linear-gradient(90deg, var(--purple-dim), var(--purple));
+    border-radius:4px;
+    transition:width .3s ease;
+  }
+  .g-meter-marker{
+    position:absolute;
+    top:-3px;
+    width:1px;height:14px;
+    background:var(--text-dim);
+  }
+
+  .fall-flag{
+    display:none;
+    align-items:center;
+    gap:10px;
+    background:rgba(255,59,92,0.1);
+    border:1px solid rgba(255,59,92,0.5);
+    border-radius:9px;
+    padding:12px 15px;
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--red);
+    animation:critGlow 1s ease-in-out infinite;
+  }
+  .fall-flag.show{display:flex;}
+
+  /* ============ EMPTY STATE ============ */
+  .empty-state{
+    grid-column:1/-1;
+    text-align:center;
+    padding:90px 20px;
+    color:var(--text-dim);
+  }
+  .empty-state .ico{font-size:36px;margin-bottom:14px;opacity:0.5;}
+  .empty-state h2{font-size:17px;color:var(--text-mid);font-weight:600;margin-bottom:8px;}
+  .empty-state p{font-family:var(--mono);font-size:12px;max-width:380px;margin:0 auto;line-height:1.6;}
+
+  .footer-strip{
+    margin-top:18px;
+    display:flex;
+    justify-content:space-between;
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--text-dim);
+    letter-spacing:0.04em;
+  }
+
+  ::selection{background:var(--purple-glow);}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="brand">
+    <div class="brand-mark"></div>
+    <div>
+      <h1>SENTINEL</h1>
+      <div class="sub">WORKER SAFETY TELEMETRY</div>
+    </div>
+  </div>
+  <div class="conn-block">
+    <div class="device-tag" id="deviceTag"><span class="dot"></span><span id="deviceTagText">NO DEVICE</span></div>
+    <button id="connectBtn">CONNECT DEVICE</button>
+  </div>
+</div>
+
+<div class="alert-banner" id="alertBanner">
+  <span id="alertIcon">⚠</span>
+  <span id="alertText"></span>
+</div>
+
+<div class="grid" id="grid">
+  <div class="empty-state">
+    <div class="ico">◌</div>
+    <h2>Awaiting Connection</h2>
+    <p>Plug in the ESP32 over USB, then click CONNECT DEVICE and select its serial port. Readings stream live at 1Hz once connected.</p>
+  </div>
+</div>
+
+<div class="footer-strip">
+  <span id="uptimeText">UPTIME — 00:00:00</span>
+  <span id="lastUpdateText">LAST PACKET — —</span>
+</div>
+
+<script>
+// ---------------- DOM refs (built lazily once data arrives) ----------------
+const grid = document.getElementById('grid');
+const connectBtn = document.getElementById('connectBtn');
+const deviceTag = document.getElementById('deviceTag');
+const deviceTagText = document.getElementById('deviceTagText');
+const alertBanner = document.getElementById('alertBanner');
+const alertIcon = document.getElementById('alertIcon');
+const alertText = document.getElementById('alertText');
+const uptimeText = document.getElementById('uptimeText');
+const lastUpdateText = document.getElementById('lastUpdateText');
+
+let port, reader, keepReading = false;
+let lineBuffer = '';
+let dashboardBuilt = false;
+
+// ---------------- Web Serial connect/disconnect ----------------
+connectBtn.addEventListener('click', async () => {
+  if (port) { await disconnectSerial(); return; }
+
+  if (!('serial' in navigator)) {
+    alert('Web Serial API not supported. Use Chrome or Edge over HTTPS / localhost.');
+    return;
+  }
+
+  try {
+    connectBtn.disabled = true;
+    connectBtn.textContent = 'CONNECTING…';
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+
+    deviceTag.classList.add('live');
+    deviceTagText.textContent = 'CONNECTING…';
+    connectBtn.classList.add('connected');
+    connectBtn.textContent = 'DISCONNECT';
+    connectBtn.disabled = false;
+
+    keepReading = true;
+    readLoop();
+  } catch (err) {
+    console.error(err);
+    connectBtn.disabled = false;
+    connectBtn.textContent = 'CONNECT DEVICE';
+    if (err.name !== 'NotFoundError') alert('Connection failed: ' + err.message);
+  }
+});
+
+async function disconnectSerial() {
+  keepReading = false;
+  try { if (reader) { await reader.cancel(); } } catch(e){}
+  try { if (port) { await port.close(); } } catch(e){}
+  port = null;
+  connectBtn.classList.remove('connected');
+  connectBtn.textContent = 'CONNECT DEVICE';
+  deviceTag.classList.remove('live');
+  deviceTagText.textContent = 'DISCONNECTED';
+}
+
+async function readLoop() {
+  const decoder = new TextDecoderStream();
+  const inputDone = port.readable.pipeTo(decoder.writable);
+  const inputStream = decoder.readable;
+  reader = inputStream.getReader();
+
+  while (keepReading) {
+    try {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) {
+        lineBuffer += value;
+        let idx;
+        while ((idx = lineBuffer.indexOf('\n')) >= 0) {
+          const line = lineBuffer.slice(0, idx);
+          lineBuffer = lineBuffer.slice(idx + 1);
+          handleLine(line);
+        }
+      }
+    } catch (err) {
+      console.error('Read error', err);
+      break;
+    }
+  }
+  reader.releaseLock();
+}
+
+function handleLine(line) {
+  const start = line.indexOf('<<<JSON');
+  const end = line.indexOf('>>>JSON');
+  if (start === -1 || end === -1) return;
+  const jsonStr = line.slice(start + 7, end);
+  try {
+    const data = JSON.parse(jsonStr);
+    onPacket(data);
+  } catch (e) {
+    // partial / corrupted line — ignore, next packet will arrive in ~1s
+  }
+}
+
+// ---------------- Build dashboard skeleton once ----------------
+function buildDashboard() {
+  grid.innerHTML = `
+    <div class="panel" id="gasPanel">
+      <div class="panel-head">
+        <div class="panel-title">Gas <span class="accent">Composition</span></div>
+        <div class="panel-meta" id="gasMeta">3 SENSORS</div>
+      </div>
+      <div class="gas-rows">
+        <div class="gas-row" id="row-mq7">
+          <div class="gas-name">MQ-7<span class="sub">CO</span></div>
+          <div>
+            <div class="gas-bar-wrap"><div class="gas-bar" id="bar-mq7"></div></div>
+            <div class="gas-stats"><span id="rs-mq7">Rs —</span><span id="ratio-mq7">ratio —</span></div>
+          </div>
+          <div class="gas-ppm"><span id="ppm-mq7">—</span><span class="unit"> ppm</span></div>
+        </div>
+        <div class="gas-row" id="row-mq135">
+          <div class="gas-name">MQ-135<span class="sub">NH3 / AIR</span></div>
+          <div>
+            <div class="gas-bar-wrap"><div class="gas-bar" id="bar-mq135"></div></div>
+            <div class="gas-stats"><span id="rs-mq135">Rs —</span><span id="ratio-mq135">ratio —</span></div>
+          </div>
+          <div class="gas-ppm"><span id="ppm-mq135">—</span><span class="unit"> ppm</span></div>
+        </div>
+        <div class="gas-row" id="row-mq2">
+          <div class="gas-name">MQ-2<span class="sub">LPG / SMOKE</span></div>
+          <div>
+            <div class="gas-bar-wrap"><div class="gas-bar" id="bar-mq2"></div></div>
+            <div class="gas-stats"><span id="rs-mq2">Rs —</span><span id="ratio-mq2">ratio —</span></div>
+          </div>
+          <div class="gas-ppm"><span id="ppm-mq2">—</span><span class="unit"> ppm</span></div>
+        </div>
+      </div>
+      <div class="id-block">
+        <div>
+          <div class="id-label">Identified gas</div>
+          <div class="id-value" id="identifiedGas">—</div>
+          <div class="id-source" id="sensorSource">source —</div>
+        </div>
+        <div class="status-pill ok" id="statusPill">ALL CLEAR</div>
+      </div>
+    </div>
+
+    <div class="panel" id="motionPanel">
+      <div class="panel-head">
+        <div class="panel-title">Motion <span class="accent">&amp; Orientation</span></div>
+        <div class="panel-meta" id="motionMeta">MPU-6050 · 200Hz</div>
+      </div>
+
+      <div class="orientation-stage">
+        <svg id="hudSvg" viewBox="0 0 220 190">
+          <ellipse cx="110" cy="95" rx="85" ry="78" fill="none" stroke="#232333" stroke-width="1"/>
+          <line x1="110" y1="17" x2="110" y2="173" stroke="#1c1c28" stroke-width="1"/>
+          <line x1="25" y1="95" x2="195" y2="95" stroke="#1c1c28" stroke-width="1"/>
+          <g id="hudGroup">
+            <rect x="50" y="75" width="120" height="40" rx="8" fill="rgba(157,78,221,0.12)" stroke="#9d4edd" stroke-width="1.5"/>
+            <circle cx="150" cy="95" r="4" fill="#9d4edd"/>
+            <text x="58" y="100" fill="#e8e6f0" font-family="JetBrains Mono" font-size="10" font-weight="700">SENSOR</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="motion-readout">
+        <div class="ro-cell"><div class="ro-label">Roll</div><div class="ro-val" id="rollVal">0.0°</div></div>
+        <div class="ro-cell"><div class="ro-label">Pitch</div><div class="ro-val" id="pitchVal">0.0°</div></div>
+        <div class="ro-cell"><div class="ro-label">Yaw</div><div class="ro-val" id="yawVal">0.0°</div></div>
+      </div>
+
+      <div class="activity-row">
+        <div>
+          <div class="activity-label">Activity state</div>
+          <div class="activity-value" id="activityVal">—</div>
+        </div>
+        <div style="flex:1;max-width:140px;margin-left:16px;">
+          <div class="activity-label" style="text-align:right;">Total G</div>
+          <div class="g-meter">
+            <div class="g-meter-bar"><div class="g-meter-fill" id="gMeterFill"></div></div>
+            <span style="font-family:'JetBrains Mono';font-size:12px;font-weight:700;min-width:38px;" id="gMeterVal">0.0G</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="fall-flag" id="fallFlag">
+        <span>⛔</span><span id="fallFlagText">FALL DETECTED — peak impact —</span>
+      </div>
+    </div>
+  `;
+  dashboardBuilt = true;
+}
+
+// ---------------- Update with each packet ----------------
+function $(id){ return document.getElementById(id); }
+
+function setGasRow(key, sensor, maxRatio) {
+  const drop = Math.max(0, Math.min(1, 1 - sensor.ratio));
+  $('bar-' + key).style.width = (drop * 100).toFixed(0) + '%';
+  $('rs-' + key).textContent = 'Rs ' + sensor.rs.toFixed(2) + 'kΩ';
+  $('ratio-' + key).textContent = 'ratio ' + sensor.ratio.toFixed(3);
+  $('ppm-' + key).textContent = sensor.valid ? sensor.ppm.toFixed(0) : '—';
+  $('row-' + key).classList.toggle('active', drop > 0.05);
+
+  let color = 'var(--purple)';
+  if (drop > 0.6) color = 'var(--red)';
+  else if (drop > 0.25) color = 'var(--amber)';
+  $('bar-' + key).style.background = drop > 0.05
+    ? `linear-gradient(90deg, var(--purple-dim), ${color})`
+    : 'linear-gradient(90deg, var(--purple-dim), var(--purple))';
+}
+
+function onPacket(d) {
+  if (!dashboardBuilt) buildDashboard();
+
+  deviceTagText.textContent = d.device || 'CONNECTED';
+
+  // ---- gas ----
+  setGasRow('mq7', d.gas.mq7);
+  setGasRow('mq135', d.gas.mq135);
+  setGasRow('mq2', d.gas.mq2);
+
+  $('identifiedGas').textContent = d.gas.identifiedGas;
+  $('sensorSource').textContent = 'source: ' + d.gas.sensorSource;
+
+  const pill = $('statusPill');
+  pill.classList.remove('ok','warn','crit');
+  if (d.gas.alertLevel === 2) { pill.classList.add('crit'); pill.textContent = 'CRITICAL'; }
+  else if (d.gas.alertLevel === 1) { pill.classList.add('warn'); pill.textContent = 'WARNING'; }
+  else { pill.classList.add('ok'); pill.textContent = 'ALL CLEAR'; }
+
+  // ---- alert banner ----
+  if (d.gas.alertLevel === 2) {
+    alertBanner.className = 'alert-banner show crit';
+    alertIcon.textContent = '🚨';
+    alertText.innerHTML = '<b>CRITICAL</b> — ' + d.gas.alertDesc;
+  } else if (d.gas.alertLevel === 1) {
+    alertBanner.className = 'alert-banner show warn';
+    alertIcon.textContent = '⚠';
+    alertText.innerHTML = '<b>WARNING</b> — ' + d.gas.alertDesc;
+  } else {
+    alertBanner.className = 'alert-banner';
+  }
+
+  // ---- motion ----
+  const m = d.motion;
+  $('rollVal').textContent = m.roll.toFixed(1) + '°';
+  $('pitchVal').textContent = m.pitch.toFixed(1) + '°';
+  $('yawVal').textContent = m.yaw.toFixed(1) + '°';
+  $('activityVal').textContent = m.activity;
+  $('activityVal').style.color = m.fallDetected ? 'var(--red)' : 'var(--text)';
+
+  const gPct = Math.min(100, (m.accel.totalG / 3.0) * 100);
+  $('gMeterFill').style.width = gPct + '%';
+  $('gMeterFill').style.background = m.accel.totalG > 2.5
+    ? 'var(--red)' : (m.accel.totalG < 0.5 ? 'var(--amber)' : 'linear-gradient(90deg, var(--purple-dim), var(--purple))');
+  $('gMeterVal').textContent = m.accel.totalG.toFixed(2) + 'G';
+
+  const fallFlag = $('fallFlag');
+  if (m.fallDetected) {
+    fallFlag.classList.add('show');
+    $('fallFlagText').textContent = 'FALL DETECTED — peak impact ' + m.impactG.toFixed(2) + 'G';
+  } else {
+    fallFlag.classList.remove('show');
+  }
+
+  // 3D-ish tilt of the HUD rectangle using roll/pitch
+  const hud = $('hudGroup');
+  if (hud) {
+    hud.setAttribute('transform', `rotate(${-m.roll.toFixed(1)} 110 95) translate(0 ${(-m.pitch/4).toFixed(1)})`);
+  }
+
+  // ---- footer ----
+  const s = d.uptime;
+  const hh = String(Math.floor(s/3600)).padStart(2,'0');
+  const mm = String(Math.floor((s%3600)/60)).padStart(2,'0');
+  const ss = String(s%60).padStart(2,'0');
+  uptimeText.textContent = `UPTIME — ${hh}:${mm}:${ss}`;
+  lastUpdateText.textContent = 'LAST PACKET — ' + new Date().toLocaleTimeString();
+}
+
+// Handle device unplugged
+navigator.serial?.addEventListener?.('disconnect', () => {
+  disconnectSerial();
+});
+</script>
+</body>
+</html>
